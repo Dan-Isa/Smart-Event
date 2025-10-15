@@ -1,0 +1,5 @@
+{
+  "name": "Smart Event Management System",
+  "description": "A multi-tenant event management system for students, lecturers, and administrators in educational institutions. Features role-based access for creating, managing, and registering for events, along with notifications and analytics.",
+  "requestFramePermissions": []
+}
