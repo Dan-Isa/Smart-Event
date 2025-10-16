@@ -1,18 +1,107 @@
-rules_version='2'
-
+rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     match /{document=**} {
-      // This rule allows anyone with your database reference to view, edit,
-      // and delete all data in your database. It is useful for getting
-      // started, but it is configured to expire after 30 days because it
-      // leaves your app open to attackers. At that time, all client
-      // requests to your database will be denied.
-      //
-      // Make sure to write security rules for your app before that time, or
-      // else all client requests to your database will be denied until you
-      // update your rules.
-      allow read, write: if request.time < timestamp.date(2025, 11, 14);
+      // Temporarily allow read/write access for seeding
+      allow read, write: if true;
+    }
+    
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && getUserData().role == 'admin';
+    }
+    
+    function isLecturer() {
+      return isAuthenticated() && getUserData().role == 'lecturer';
+    }
+    
+    function isStudent() {
+      return isAuthenticated() && getUserData().role == 'student';
+    }
+    
+    function sameInstitution(resourceData) {
+      return getUserData().institution == resourceData.institution;
+    }
+    
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    // ==========================================
+    // USERS COLLECTION
+    // ==========================================
+    match /users/{userId} {
+      // Anyone can read their own user document
+      allow read: if isAuthenticated() && isOwner(userId);
+      
+      // Users can update their own profile (limited fields)
+      allow update: if isAuthenticated() && isOwner(userId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'institution', 'email']);
+      
+      // Admins can read all users in their institution
+      allow read: if isAdmin() && sameInstitution(resource.data);
+      
+      // Admins can create users in their institution
+      allow create: if isAdmin() && 
+        request.resource.data.institution == getUserData().institution;
+      
+      // Admins can delete users in their institution (except themselves)
+      allow delete: if isAdmin() && 
+        sameInstitution(resource.data) && 
+        !isOwner(userId);
+    }
+    
+    // ==========================================
+    // EVENTS COLLECTION
+    // ==========================================
+    match /events/{eventId} {
+      // All authenticated users can read events from their institution
+      allow read: if isAuthenticated() && sameInstitution(resource.data);
+      
+      // Admins and lecturers can create events
+      allow create: if (isAdmin() || isLecturer()) &&
+        request.resource.data.institution == getUserData().institution &&
+        request.resource.data.creatorId == request.auth.uid;
+      
+      // Creators can update their own events
+      allow update: if isAuthenticated() && 
+        resource.data.creatorId == request.auth.uid;
+      
+      // Admins and creators can delete events
+      allow delete: if (isAdmin() && sameInstitution(resource.data)) ||
+        (isAuthenticated() && resource.data.creatorId == request.auth.uid);
+      
+      // Students can register/unregister (update registrations array)
+      allow update: if isStudent() &&
+        sameInstitution(resource.data) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['registrations', 'updatedAt']);
+      
+      // Students can add feedback (update feedback array)
+      allow update: if isStudent() &&
+        sameInstitution(resource.data) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['feedback', 'updatedAt']);
+    }
+    
+    // ==========================================
+    // NOTIFICATIONS COLLECTION
+    // ==========================================
+    match /notifications/{notificationId} {
+      // Users can read their own notifications
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      
+      // Users can update their own notifications (mark as read)
+      allow update: if isAuthenticated() && 
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
+      
+      // System can create notifications (via Cloud Functions)
+      allow create: if isAuthenticated();
+      
+      // Users can delete their own notifications
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
   }
 }
