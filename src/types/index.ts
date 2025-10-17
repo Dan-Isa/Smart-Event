@@ -1,6 +1,12 @@
-// ==========================================
+// ============================================
+// SHARED TYPES FOR FRONTEND & BACKEND
+// ============================================
+
+import { Timestamp } from 'firebase/firestore';
+
+// ============================================
 // USER TYPES
-// ==========================================
+// ============================================
 
 export enum UserRole {
   ADMIN = 'admin',
@@ -16,24 +22,24 @@ export interface User {
   institution: string;
   department?: string;
   class?: string;
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt: Date | Timestamp;
+  updatedAt: Date | Timestamp;
 }
 
-// For Firestore documents (dates as Timestamps)
+// Firestore document version (with Timestamps)
 export interface UserDocument extends Omit<User, 'createdAt' | 'updatedAt'> {
-  createdAt: FirebaseFirestore.Timestamp;
-  updatedAt: FirebaseFirestore.Timestamp;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
 }
 
-// ==========================================
+// ============================================
 // EVENT TYPES
-// ==========================================
+// ============================================
 
 export enum AudienceType {
   GENERAL = 'general',
   DEPARTMENT = 'department',
-  CLASS = 'class'
+  CLASS = 'class',
 }
 
 export interface TargetAudience {
@@ -45,11 +51,11 @@ export interface Registration {
   studentId: string;
   studentName: string;
   studentEmail: string;
-  registeredAt: Date;
+  registeredAt: Date | Timestamp;
 }
 
 export interface RegistrationDocument extends Omit<Registration, 'registeredAt'> {
-  registeredAt: FirebaseFirestore.Timestamp;
+  registeredAt: Timestamp;
 }
 
 export interface Feedback {
@@ -57,18 +63,18 @@ export interface Feedback {
   studentName: string;
   rating: number; // 1-5
   comment: string;
-  submittedAt: Date;
+  submittedAt: Date | Timestamp;
 }
 
 export interface FeedbackDocument extends Omit<Feedback, 'submittedAt'> {
-  submittedAt: FirebaseFirestore.Timestamp;
+  submittedAt: Timestamp;
 }
 
 export interface Event {
   id: string;
   title: string;
   description: string;
-  date: Date;
+  date: Date | Timestamp;
   location: string;
   creatorId: string;
   creatorName: string;
@@ -76,20 +82,22 @@ export interface Event {
   targetAudience: TargetAudience;
   registrations: Registration[];
   feedback: Feedback[];
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt: Date | Timestamp;
+  updatedAt: Date | Timestamp;
 }
 
-// For Firestore documents
+// Firestore document version
 export interface EventDocument extends Omit<Event, 'date' | 'registrations' | 'feedback' | 'createdAt' | 'updatedAt'> {
-  date: FirebaseFirestore.Timestamp;
-  createdAt: FirebaseFirestore.Timestamp;
-  updatedAt: FirebaseFirestore.Timestamp;
+  date: Timestamp;
+  registrations: RegistrationDocument[];
+  feedback: FeedbackDocument[];
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
 }
 
-// ==========================================
+// ============================================
 // NOTIFICATION TYPES
-// ==========================================
+// ============================================
 
 export enum NotificationType {
   EVENT_CREATED = 'event_created',
@@ -104,91 +112,108 @@ export interface Notification {
   userId: string;
   type: NotificationType;
   message: string;
+  eventId?: string;
   link?: string;
   isRead: boolean;
-  createdAt: Date;
-  eventId?: string;
+  createdAt: Date | Timestamp;
 }
 
 export interface NotificationDocument extends Omit<Notification, 'createdAt'> {
-  createdAt: FirebaseFirestore.Timestamp;
+  createdAt: Timestamp;
 }
 
-// ==========================================
-// API RESPONSE TYPES
-// ==========================================
+// ============================================
+// API REQUEST/RESPONSE TYPES
+// ============================================
 
-export interface ApiResponse<T = any> {
-  success: boolean;
-  data?: T;
-  error?: string;
-  message?: string;
+export interface CreateEventRequest {
+  title: string;
+  description: string;
+  date: Date;
+  location: string;
+  targetAudience: TargetAudience;
 }
 
-// ==========================================
-// FORM DATA TYPES
-// ==========================================
-
-export interface CreateEventData extends Omit<Event, 'id' | 'registrations' | 'feedback' | 'createdAt' | 'updatedAt'> {}
-
-export interface UpdateEventData extends Partial<CreateEventData> {
+export interface UpdateEventRequest extends Partial<CreateEventRequest> {
   id: string;
 }
 
-export interface CreateUserData {
+export interface RegisterForEventRequest {
+  eventId: string;
+  studentId: string;
+  studentName: string;
+  studentEmail: string;
+}
+
+export interface SubmitFeedbackRequest {
+  eventId: string;
+  studentId: string;
+  studentName: string;
+  rating: number;
+  comment: string;
+}
+
+export interface CreateUserRequest {
   email: string;
-  password: string;
   role: UserRole;
   institution: string;
-  username?: string;
   department?: string;
   class?: string;
+  temporaryPassword: string;
 }
 
-export interface UpdateUserData {
-  username?: string;
-  department?: string;
-  class?: string;
+// ============================================
+// UTILITY TYPES
+// ============================================
+
+export type WithoutId<T> = Omit<T, 'id'>;
+export type WithTimestamps<T> = T & {
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+};
+
+// Convert Firestore Timestamp to Date for frontend
+export type ConvertTimestamps<T> = {
+  [K in keyof T]: T[K] extends Timestamp
+    ? Date
+    : T[K] extends Array<infer U>
+    ? Array<ConvertTimestamps<U>>
+    : T[K] extends object
+    ? ConvertTimestamps<T[K]>
+    : T[K];
+};
+
+// ============================================
+// FIRESTORE COLLECTION NAMES
+// ============================================
+
+export const COLLECTIONS = {
+  USERS: 'users',
+  EVENTS: 'events',
+  NOTIFICATIONS: 'notifications',
+  INSTITUTIONS: 'institutions',
+} as const;
+
+// ============================================
+// ERROR TYPES
+// ============================================
+
+export class AppError extends Error {
+  constructor(
+    public code: string,
+    message: string,
+    public statusCode: number = 400
+  ) {
+    super(message);
+    this.name = 'AppError';
+  }
 }
 
-// ==========================================
-// QUERY FILTERS
-// ==========================================
-
-export interface EventFilters {
-  institution?: string;
-  creatorId?: string;
-  targetAudienceType?: AudienceType;
-  targetAudienceValue?: string;
-  startDate?: Date;
-  endDate?: Date;
-}
-
-export interface UserFilters {
-  institution?: string;
-  role?: UserRole;
-  department?: string;
-}
-
-// ==========================================
-// ANALYTICS TYPES
-// ==========================================
-
-export interface EventAnalytics {
-  totalEvents: number;
-  totalRegistrations: number;
-  averageAttendance: number;
-  upcomingEvents: number;
-  pastEvents: number;
-  eventsByDepartment: Record<string, number>;
-  registrationTrend: Array<{
-    date: string;
-    count: number;
-  }>;
-}
-
-export interface InstitutionAnalytics extends EventAnalytics {
-  totalUsers: number;
-  usersByRole: Record<UserRole, number>;
-  activeUsers: number;
+export enum ErrorCode {
+  UNAUTHORIZED = 'unauthorized',
+  FORBIDDEN = 'forbidden',
+  NOT_FOUND = 'not_found',
+  ALREADY_EXISTS = 'already_exists',
+  INVALID_INPUT = 'invalid_input',
+  INTERNAL_ERROR = 'internal_error',
 }

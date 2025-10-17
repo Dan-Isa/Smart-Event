@@ -1,107 +1,152 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      // Temporarily allow read/write access for seeding
-      allow read, write: if true;
+    
+    // ============================================
+    // HELPER FUNCTIONS
+    // ============================================
+    
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
     }
     
+    // Get user data from request
     function getUserData() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
     
+    // Check if user belongs to institution
+    function belongsToInstitution(institution) {
+      return isAuthenticated() && getUserData().institution == institution;
+    }
+    
+    // Check if user has specific role
+    function hasRole(role) {
+      return isAuthenticated() && getUserData().role == role;
+    }
+    
+    // Check if user is admin
     function isAdmin() {
-      return isAuthenticated() && getUserData().role == 'admin';
+      return hasRole('admin');
     }
     
+    // Check if user is lecturer
     function isLecturer() {
-      return isAuthenticated() && getUserData().role == 'lecturer';
+      return hasRole('lecturer');
     }
     
+    // Check if user is student
     function isStudent() {
-      return isAuthenticated() && getUserData().role == 'student';
+      return hasRole('student');
     }
     
-    function sameInstitution(resourceData) {
-      return getUserData().institution == resourceData.institution;
-    }
-    
+    // Check if user owns the resource
     function isOwner(userId) {
       return request.auth.uid == userId;
     }
     
-    // ==========================================
+    // Check if user is creator of event
+    function isEventCreator(eventData) {
+      return request.auth.uid == eventData.creatorId;
+    }
+    
+    // ============================================
     // USERS COLLECTION
-    // ==========================================
+    // ============================================
+    
     match /users/{userId} {
-      // Anyone can read their own user document
+      // Users can read their own document
       allow read: if isAuthenticated() && isOwner(userId);
       
-      // Users can update their own profile (limited fields)
-      allow update: if isAuthenticated() && isOwner(userId) &&
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'institution', 'email']);
+      // Admins can read users in their institution
+      allow read: if isAdmin() && belongsToInstitution(resource.data.institution);
       
-      // Admins can read all users in their institution
-      allow read: if isAdmin() && sameInstitution(resource.data);
+      // Users can update their own profile (except role and institution)
+      allow update: if isAuthenticated() 
+        && isOwner(userId)
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.institution == resource.data.institution
+        && request.resource.data.email == resource.data.email;
       
-      // Admins can create users in their institution
-      allow create: if isAdmin() && 
-        request.resource.data.institution == getUserData().institution;
+      // Only admins can create users in their institution
+      allow create: if isAdmin() 
+        && request.resource.data.institution == getUserData().institution;
       
-      // Admins can delete users in their institution (except themselves)
-      allow delete: if isAdmin() && 
-        sameInstitution(resource.data) && 
-        !isOwner(userId);
+      // Only admins can delete users (but not themselves)
+      allow delete: if isAdmin() 
+        && !isOwner(userId)
+        && belongsToInstitution(resource.data.institution);
     }
     
-    // ==========================================
+    // ============================================
     // EVENTS COLLECTION
-    // ==========================================
+    // ============================================
+    
     match /events/{eventId} {
-      // All authenticated users can read events from their institution
-      allow read: if isAuthenticated() && sameInstitution(resource.data);
+      // All authenticated users can read events in their institution
+      allow read: if isAuthenticated() 
+        && belongsToInstitution(resource.data.institution);
       
       // Admins and lecturers can create events
-      allow create: if (isAdmin() || isLecturer()) &&
-        request.resource.data.institution == getUserData().institution &&
-        request.resource.data.creatorId == request.auth.uid;
+      allow create: if isAuthenticated() 
+        && (isAdmin() || isLecturer())
+        && request.resource.data.institution == getUserData().institution
+        && request.resource.data.creatorId == request.auth.uid;
       
-      // Creators can update their own events
-      allow update: if isAuthenticated() && 
-        resource.data.creatorId == request.auth.uid;
+      // Only event creator or admin can update
+      allow update: if isAuthenticated() 
+        && belongsToInstitution(resource.data.institution)
+        && (isEventCreator(resource.data) || isAdmin());
       
-      // Admins and creators can delete events
-      allow delete: if (isAdmin() && sameInstitution(resource.data)) ||
-        (isAuthenticated() && resource.data.creatorId == request.auth.uid);
-      
-      // Students can register/unregister (update registrations array)
-      allow update: if isStudent() &&
-        sameInstitution(resource.data) &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['registrations', 'updatedAt']);
-      
-      // Students can add feedback (update feedback array)
-      allow update: if isStudent() &&
-        sameInstitution(resource.data) &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['feedback', 'updatedAt']);
+      // Only event creator or admin can delete
+      allow delete: if isAuthenticated() 
+        && belongsToInstitution(resource.data.institution)
+        && (isEventCreator(resource.data) || isAdmin());
     }
     
-    // ==========================================
+    // ============================================
     // NOTIFICATIONS COLLECTION
-    // ==========================================
+    // ============================================
+    
     match /notifications/{notificationId} {
-      // Users can read their own notifications
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      
-      // Users can update their own notifications (mark as read)
-      allow update: if isAuthenticated() && 
-        resource.data.userId == request.auth.uid &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
+      // Users can only read their own notifications
+      allow read: if isAuthenticated() 
+        && isOwner(resource.data.userId);
       
       // System can create notifications (via Cloud Functions)
       allow create: if isAuthenticated();
       
+      // Users can update their own notifications (mark as read)
+      allow update: if isAuthenticated() 
+        && isOwner(resource.data.userId)
+        && request.resource.data.userId == resource.data.userId;
+      
       // Users can delete their own notifications
-      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() 
+        && isOwner(resource.data.userId);
+    }
+    
+    // ============================================
+    // INSTITUTIONS COLLECTION (Optional for future)
+    // ============================================
+    
+    match /institutions/{institutionId} {
+      // All authenticated users can read their institution
+      allow read: if isAuthenticated() 
+        && getUserData().institution == institutionId;
+      
+      // Only system admins can create/update/delete institutions
+      allow write: if false; // Managed via admin SDK or console
+    }
+    
+    // ============================================
+    // DEFAULT DENY ALL
+    // ============================================
+    
+    // Deny all other access
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
